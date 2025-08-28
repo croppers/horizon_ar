@@ -1,7 +1,7 @@
 import { azimuthToScreenX, estimateVfovDeg, isWithinFov, edgeSide, pitchToScreenY } from './projection';
 import { haversineDistanceKm, initialBearingDeg, wrap180 } from './geo';
 import type { City, RendererInput } from './types';
-import { drawMinimap } from './minimap';
+import { drawCoastlines } from './coastlines';
 
 interface Rect { x: number; y: number; w: number; h: number; }
 
@@ -202,25 +202,25 @@ export function render(ctx: CanvasRenderingContext2D, input: RendererInput, now:
 
   updateAlpha(visibleKeys, dt);
 
-  // Draw minimap (bottom-right)
+  // Draw coastlines inset (bottom-right)
   if (showMinimap !== false) {
     const pad = 8;
     const wMini = Math.min(240, Math.floor(width * 0.5));
     const hMini = Math.min(140, Math.floor(height * 0.35));
     const xMini = width - pad - wMini;
     const yMini = height - pad - hMini;
-    drawMinimap(ctx, {
-      canvasWidth: width,
-      canvasHeight: height,
+    drawCoastlines({
+      ctx,
       x: xMini,
       y: yMini,
       w: wMini,
       h: hMini,
-      user,
+      userLon: user.lon,
+      userLat: user.lat,
       headingDeg,
-      hfovDeg,
+      hfovDeg: hfovDeg,
       maxDistanceKm,
-      cities
+      styles: { stroke: 'rgba(255,255,255,0.45)', fill: 'rgba(60,90,70,0.25)', lineWidth: 0.8, alpha: 1 }
     });
   }
 

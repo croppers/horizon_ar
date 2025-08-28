@@ -2,6 +2,7 @@ import { initUI } from './ui';
 import { startCamera, requestMotionPermissions, watchGeolocation, startOrientation } from './sensors';
 import { estimateVfovDeg } from './projection';
 import type { City, Settings } from './types';
+import { ensureLandLoaded } from './coastlines';
 
 const video = document.getElementById('camera') as HTMLVideoElement;
 const canvas = document.getElementById('overlay') as HTMLCanvasElement;
@@ -30,6 +31,7 @@ const ui = initUI({
     // Then request motion and camera without awaiting to avoid losing user activation
     requestMotionPermissions().catch(() => {});
     startCamera(video).catch(() => {});
+    ensureLandLoaded().catch(() => {});
   },
   onManualGeo: (pos) => {
     user = pos; haveLocation = true; uiHelpers.setGeoStatus(`${pos.lat.toFixed(5)}, ${pos.lon.toFixed(5)} (manual)`);
