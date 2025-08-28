@@ -35,6 +35,7 @@ export interface Settings {
   hfovDeg: number;
   headingOffsetDeg: number;
   smoothing: number; // 0..0.3
+  showOffscreenIndicators: boolean;
 }
 
 export interface RendererInput {
@@ -48,4 +49,5 @@ export interface RendererInput {
   user: LatLon;
   cities: City[];
   populationOpacity: Map<string, number>; // key = `${name}|${country}`
+  showOffscreenIndicators: boolean;
 }

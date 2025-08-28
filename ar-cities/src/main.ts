@@ -7,7 +7,7 @@ const video = document.getElementById('camera') as HTMLVideoElement;
 const canvas = document.getElementById('overlay') as HTMLCanvasElement;
 const ctx = canvas.getContext('2d')!;
 
-let settings: Settings = { maxDistanceKm: 1000, units: 'km', hfovDeg: 60, headingOffsetDeg: 0, smoothing: 0.15 };
+let settings: Settings = { maxDistanceKm: 1000, units: 'km', hfovDeg: 60, headingOffsetDeg: 0, smoothing: 0.15, showOffscreenIndicators: false };
 
 let user = { lat: 0, lon: 0 };
 let haveLocation = false;
@@ -139,6 +139,7 @@ function raf() {
       user,
       cities,
       populationOpacity: new Map(),
+      showOffscreenIndicators: settings.showOffscreenIndicators,
     }, now, lastNowRef);
   } else {
     // Draw subtle text prompting start

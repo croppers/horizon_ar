@@ -56,7 +56,7 @@ function findNonOverlappingY(rect: Rect, placed: Rect[], height: number, maxStep
 export interface RenderResult { visibleCount: number; }
 
 export function render(ctx: CanvasRenderingContext2D, input: RendererInput, now: number, lastNowRef: { v: number }): RenderResult {
-  const { width, height, hfovDeg, pitchDeg, headingDeg, cities, user, units, maxDistanceKm } = input;
+  const { width, height, hfovDeg, pitchDeg, headingDeg, cities, user, units, maxDistanceKm, showOffscreenIndicators } = input;
   const dpr = Math.max(1, window.devicePixelRatio || 1);
   if (ctx.canvas.width !== Math.floor(width * dpr) || ctx.canvas.height !== Math.floor(height * dpr)) {
     ctx.canvas.width = Math.floor(width * dpr);
@@ -147,6 +147,11 @@ export function render(ctx: CanvasRenderingContext2D, input: RendererInput, now:
       ctx.fillText(text, rect.x + 6, rect.y + rect.h - 6);
       ctx.restore();
     } else {
+      if (!showOffscreenIndicators) {
+        // Do not show offscreen indicators when disabled, but keep alpha animation in sync
+        visibleKeys.add(key);
+        continue;
+      }
       visibleKeys.add(key); // still animate alpha for edge indicator
       const alpha = labelAlpha.get(key) ?? 0;
       if (alpha <= 0.01) continue;

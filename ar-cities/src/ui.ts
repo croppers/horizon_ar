@@ -1,6 +1,6 @@
 import type { Settings, Units, LatLon } from './types';
 
-const LS_KEY = 'arcities.settings.v1';
+const LS_KEY = 'arcities.settings.v2';
 
 export interface UIState {
   settings: Settings;
@@ -14,7 +14,7 @@ function loadSettings(): Settings {
     const raw = localStorage.getItem(LS_KEY);
     if (raw) return JSON.parse(raw) as Settings;
   } catch {}
-  return { maxDistanceKm: 1000, units: 'km', hfovDeg: 60, headingOffsetDeg: 0, smoothing: 0.15 };
+  return { maxDistanceKm: 1000, units: 'km', hfovDeg: 60, headingOffsetDeg: 0, smoothing: 0.15, showOffscreenIndicators: false };
 }
 
 function saveSettings(s: Settings) {
@@ -41,6 +41,7 @@ export function initUI(state: UIState) {
   const headingOffsetValue = document.getElementById('headingOffsetValue') as HTMLSpanElement;
   const smooth = document.getElementById('smooth') as HTMLInputElement;
   const smoothValue = document.getElementById('smoothValue') as HTMLSpanElement;
+  const showOffscreen = document.getElementById('showOffscreen') as HTMLInputElement;
 
   const dbgHeading = document.getElementById('dbgHeading') as HTMLSpanElement;
   const dbgPitch = document.getElementById('dbgPitch') as HTMLSpanElement;
@@ -79,6 +80,7 @@ export function initUI(state: UIState) {
   headingOffset.value = String(settings.headingOffsetDeg);
   smooth.value = String(settings.smoothing);
   if (settings.units === 'km') unitsKm.checked = true; else unitsMi.checked = true;
+  showOffscreen.checked = !!settings.showOffscreenIndicators;
 
   function fmtDistance(vKm: number, units: Units) {
     if (units === 'km') return `${Math.round(vKm)} km`;
@@ -104,6 +106,7 @@ export function initUI(state: UIState) {
   hfov.addEventListener('input', () => { settings.hfovDeg = Number(hfov.value); pushChange(); });
   headingOffset.addEventListener('input', () => { settings.headingOffsetDeg = Number(headingOffset.value); pushChange(); });
   smooth.addEventListener('input', () => { settings.smoothing = Number(smooth.value); pushChange(); });
+  showOffscreen.addEventListener('change', () => { settings.showOffscreenIndicators = showOffscreen.checked; pushChange(); });
 
   unitsKm.addEventListener('change', () => { settings.units = 'km'; pushChange(); });
   unitsMi.addEventListener('change', () => { settings.units = 'mi'; pushChange(); });
