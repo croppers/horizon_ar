@@ -1,36 +1,177 @@
 import type { City, LatLon } from './types';
 import { haversineDistanceKm, wrap180 } from './geo';
-import { feature, mesh } from 'topojson-client';
 
-// Data source: Natural Earth via unpkg world-atlas (under permissive terms)
-// We fetch small-scale (110m) data for low payload.
-const LAND_TOPO_URL = 'https://unpkg.com/world-atlas@2/land-110m.json';
-const COUNTRIES_TOPO_URL = 'https://unpkg.com/world-atlas@2/countries-110m.json';
+// Land/sea mask (0.1° grid) loader from public/surfrac0.1.PPS
+// Supports PGM/PPM (P5/P6/P2/P3) and a simple ASCII grid fallback.
+const LAND_MASK_URL = './surfrac0.1.PPS';
+let landMaskCanvas: HTMLCanvasElement | null = null;
+let landMaskLoading = false;
 
-let loadWorldPromise: Promise<void> | null = null;
-let cachedLand: GeoJSON.MultiPolygon | GeoJSON.Polygon | null = null;
-let cachedCountriesMesh: GeoJSON.MultiLineString | GeoJSON.LineString | null = null;
+function parseHeaderTokens(text: string): { tokens: string[]; headerLen: number } {
+  // Remove comments (# ... endline) and split by whitespace
+  let header = '';
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === '#') {
+      // skip to end of line
+      while (i < text.length && text[i] !== '\n') i++;
+    } else {
+      header += ch;
+    }
+    i++;
+    // Stop once we likely consumed magic + dims + maxval
+    if (header.split(/\s+/).filter(Boolean).length >= 6 && header.includes('\n')) {
+      // heuristic break; actual cut determined later
+      if (header.length > 256) break;
+    }
+  }
+  const tokens = header.trim().split(/\s+/);
+  return { tokens, headerLen: header.length };
+}
 
-async function loadWorld(): Promise<void> {
-  if (cachedLand && cachedCountriesMesh) return;
-  if (loadWorldPromise) return loadWorldPromise;
-  loadWorldPromise = (async () => {
-    const [landRes, countriesRes] = await Promise.all([
-      fetch(LAND_TOPO_URL, { cache: 'force-cache' }),
-      fetch(COUNTRIES_TOPO_URL, { cache: 'force-cache' })
-    ]);
-    if (!landRes.ok || !countriesRes.ok) throw new Error('Failed to load world atlas');
-    const [landTopo, countriesTopo] = await Promise.all([landRes.json(), countriesRes.json()]);
-    const landFeat: any = feature(landTopo, (landTopo.objects as any).land);
-    cachedLand = landFeat as any;
-    const countriesMesh: any = mesh(countriesTopo, (countriesTopo.objects as any).countries, (a: any, b: any) => a !== b);
-    cachedCountriesMesh = countriesMesh as any;
-  })();
+async function ensureLandMask(): Promise<void> {
+  if (landMaskCanvas || landMaskLoading) return;
+  landMaskLoading = true;
   try {
-    await loadWorldPromise;
+    const res = await fetch(LAND_MASK_URL, { cache: 'force-cache' });
+    if (!res.ok) throw new Error('failed to fetch land mask');
+    const buf = await res.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    // Try to parse as binary PGM/PPM (P5/P6)
+    const headerText = new TextDecoder('ascii').decode(bytes.subarray(0, Math.min(2048, bytes.length)));
+    if (headerText.startsWith('P5') || headerText.startsWith('P6') || headerText.startsWith('P2') || headerText.startsWith('P3')) {
+      const { tokens, headerLen } = parseHeaderTokens(headerText);
+      const magic = tokens[0];
+      let idx = 1;
+      const width = parseInt(tokens[idx++], 10);
+      const height = parseInt(tokens[idx++], 10);
+      const maxval = parseInt(tokens[idx++], 10) || 255;
+      if (!Number.isFinite(width) || !Number.isFinite(height)) throw new Error('invalid PNM dims');
+      const isAscii = magic === 'P2' || magic === 'P3';
+      const isColor = magic === 'P6' || magic === 'P3';
+      let gray: Uint8ClampedArray;
+      if (!isAscii) {
+        // Binary: data starts after headerLen (approx). Find actual start by seeking first byte after maxval newline.
+        // Find the first '\n' after occurrences of magic, dims, maxval accounting for comments.
+        let dataStart = headerText.indexOf('\n', headerText.indexOf(String(maxval))) + 1;
+        if (dataStart <= 0) dataStart = headerLen; // best-effort
+        const data = bytes.subarray(dataStart);
+        const bytesPerPixel = isColor ? 3 : 1;
+        const expected = width * height * bytesPerPixel * (maxval < 256 ? 1 : 2);
+        if (data.length < expected) throw new Error('PNM data truncated');
+        gray = new Uint8ClampedArray(width * height);
+        if (maxval < 256) {
+          if (isColor) {
+            for (let i = 0, j = 0; i < gray.length; i++, j += 3) {
+              // luminance
+              gray[i] = (data[j] * 0.2126 + data[j + 1] * 0.7152 + data[j + 2] * 0.0722) & 0xff;
+            }
+          } else {
+            gray.set(data.subarray(0, gray.length));
+          }
+        } else {
+          // 16-bit
+          const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
+          if (isColor) {
+            let o = 0;
+            for (let i = 0; i < gray.length; i++) {
+              const r = dv.getUint16(o); o += 2;
+              const g = dv.getUint16(o); o += 2;
+              const b = dv.getUint16(o); o += 2;
+              const y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+              gray[i] = Math.round((y / maxval) * 255);
+            }
+          } else {
+            let o = 0;
+            for (let i = 0; i < gray.length; i++) {
+              const v = dv.getUint16(o); o += 2;
+              gray[i] = Math.round((v / maxval) * 255);
+            }
+          }
+        }
+      } else {
+        // ASCII P2/P3
+        const text = new TextDecoder('ascii').decode(bytes);
+        // Remove comments, then split tokens
+        const cleaned = text.replace(/#.*$/gm, ' ');
+        const parts = cleaned.trim().split(/\s+/);
+        // parts: magic, w, h, maxval, then samples
+        const start = 4;
+        gray = new Uint8ClampedArray(width * height);
+        if (magic === 'P2') {
+          for (let i = 0; i < gray.length; i++) {
+            const v = parseFloat(parts[start + i]) || 0;
+            gray[i] = Math.max(0, Math.min(255, Math.round((v / maxval) * 255)));
+          }
+        } else {
+          // P3 RGB ascii
+          for (let i = 0, j = start; i < gray.length; i++, j += 3) {
+            const r = parseFloat(parts[j]) || 0;
+            const g = parseFloat(parts[j + 1]) || 0;
+            const b = parseFloat(parts[j + 2]) || 0;
+            const y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+            gray[i] = Math.max(0, Math.min(255, Math.round((y / maxval) * 255)));
+          }
+        }
+      }
+      // Build mask canvas (downsample aggressively for perf)
+      const targetW = 1024;
+      const targetH = Math.max(1, Math.round((targetW * height) / width));
+      const canvas = document.createElement('canvas');
+      canvas.width = targetW; canvas.height = targetH;
+      const cctx = canvas.getContext('2d')!;
+      const img = cctx.createImageData(targetW, targetH);
+      for (let ty = 0; ty < targetH; ty++) {
+        const sy = Math.floor((ty / targetH) * height);
+        for (let tx = 0; tx < targetW; tx++) {
+          const sx = Math.floor((tx / targetW) * width);
+          const v = gray[sy * width + sx];
+          const land = v >= 128; // threshold at 0.5
+          const o = (ty * targetW + tx) * 4;
+          img.data[o] = land ? 100 : 0;
+          img.data[o + 1] = land ? 180 : 0;
+          img.data[o + 2] = land ? 120 : 0;
+          img.data[o + 3] = land ? 220 : 0; // alpha
+        }
+      }
+      cctx.putImageData(img, 0, 0);
+      landMaskCanvas = canvas;
+      return;
+    }
+    // Fallback: try ASCII grid of floats (0..1). We'll sample by scanning lines.
+    const text = new TextDecoder('utf-8').decode(bytes);
+    const values = text.trim().split(/\s+/);
+    // Heuristic dims for 0.1°: 3600x1800
+    const width = 3600, height = 1800;
+    const total = width * height;
+    const targetW = 1024;
+    const targetH = Math.max(1, Math.round((targetW * height) / width));
+    const canvas = document.createElement('canvas');
+    canvas.width = targetW; canvas.height = targetH;
+    const cctx = canvas.getContext('2d')!;
+    const img = cctx.createImageData(targetW, targetH);
+    // Sample nearest for speed
+    for (let ty = 0; ty < targetH; ty++) {
+      const sy = Math.floor((ty / targetH) * height);
+      for (let tx = 0; tx < targetW; tx++) {
+        const sx = Math.floor((tx / targetW) * width);
+        const idx = sy * width + sx;
+        const v = parseFloat(values[idx]) || 0;
+        const land = v >= 0.5;
+        const o = (ty * targetW + tx) * 4;
+        img.data[o] = land ? 100 : 0;
+        img.data[o + 1] = land ? 180 : 0;
+        img.data[o + 2] = land ? 120 : 0;
+        img.data[o + 3] = land ? 220 : 0;
+      }
+    }
+    cctx.putImageData(img, 0, 0);
+    landMaskCanvas = canvas;
+  } catch {
+    // ignore; fallback will draw nothing
   } finally {
-    // keep promise for subsequent awaiters until caches set; then null out
-    loadWorldPromise = null;
+    landMaskLoading = false;
   }
 }
 
@@ -84,42 +225,7 @@ function drawRoundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, w:
   ctx.closePath();
 }
 
-function drawGeoJSONPolygon(ctx: CanvasRenderingContext2D, geom: GeoJSON.Polygon, x: number, y: number, w: number, h: number) {
-  for (const ring of geom.coordinates) {
-    for (let i = 0; i < ring.length; i++) {
-      const [lon, lat] = ring[i];
-      const { px, py } = projectEquirect(lon, lat, x, y, w, h);
-      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-    }
-    ctx.closePath();
-  }
-}
-
-function drawGeoJSONMultiPolygon(ctx: CanvasRenderingContext2D, geom: GeoJSON.MultiPolygon, x: number, y: number, w: number, h: number) {
-  for (const poly of geom.coordinates) {
-    for (const ring of poly) {
-      for (let i = 0; i < ring.length; i++) {
-        const [lon, lat] = ring[i];
-        const { px, py } = projectEquirect(lon, lat, x, y, w, h);
-        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-      }
-      ctx.closePath();
-    }
-  }
-}
-
-function drawGeoJSONMultiLineString(ctx: CanvasRenderingContext2D, geom: GeoJSON.MultiLineString | GeoJSON.LineString, x: number, y: number, w: number, h: number) {
-  const lines = (geom.type === 'LineString') ? [geom.coordinates] : geom.coordinates;
-  for (const line of lines) {
-    for (let i = 0; i < line.length; i++) {
-      const [lon, lat] = line[i];
-      const { px, py } = projectEquirect(lon, lat, x, y, w, h);
-      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-    }
-  }
-}
-
-export async function drawMinimap(ctx: CanvasRenderingContext2D, p: MinimapParams) {
+export function drawMinimap(ctx: CanvasRenderingContext2D, p: MinimapParams) {
   const { x, y, w, h, user, headingDeg, hfovDeg, maxDistanceKm, cities } = p;
 
   // Background card
@@ -130,31 +236,15 @@ export async function drawMinimap(ctx: CanvasRenderingContext2D, p: MinimapParam
   ctx.fill();
   ctx.restore();
 
-  // Load world data on first draw
-  try { await loadWorld(); } catch {}
-
-  // Land fill
-  if (cachedLand) {
-    ctx.save();
-    ctx.strokeStyle = 'rgba(120,160,120,0.6)';
-    ctx.fillStyle = 'rgba(40,80,50,0.35)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    if (cachedLand.type === 'Polygon') drawGeoJSONPolygon(ctx, cachedLand, x, y, w, h);
-    else drawGeoJSONMultiPolygon(ctx, cachedLand as GeoJSON.MultiPolygon, x, y, w, h);
-    ctx.fill();
-    ctx.stroke();
-    ctx.restore();
+  // Land/sea mask layer
+  if (!landMaskCanvas && !landMaskLoading) {
+    // kick off load without blocking
+    void ensureLandMask();
   }
-
-  // Country boundaries overlay (semi-transparent)
-  if (cachedCountriesMesh) {
+  if (landMaskCanvas) {
     ctx.save();
-    ctx.strokeStyle = 'rgba(255,255,255,0.45)';
-    ctx.lineWidth = 0.8;
-    ctx.beginPath();
-    drawGeoJSONMultiLineString(ctx, cachedCountriesMesh, x, y, w, h);
-    ctx.stroke();
+    ctx.globalAlpha = 0.5;
+    ctx.drawImage(landMaskCanvas, 0, 0, landMaskCanvas.width, landMaskCanvas.height, x, y, w, h);
     ctx.restore();
   }
 
@@ -212,10 +302,13 @@ export async function drawMinimap(ctx: CanvasRenderingContext2D, p: MinimapParam
     let alpha = 0.25;
     let color = 'rgba(180,220,255,'; // will append alpha
     if (visibleRadius) {
-      // Rough great-circle bearing
+      // Check if within current HFOV (by bearing difference)
+      const dy = c.lat - user.lat;
+      const dx = c.lon - user.lon;
+      // Rough bearing using equirectangular approximation (sufficient for wedge inclusion on small map)
       const bearing = (Math.atan2(
-        Math.sin(toRad(c.lon - user.lon)) * Math.cos(toRad(c.lat)),
-        Math.cos(toRad(user.lat)) * Math.sin(toRad(c.lat)) - Math.sin(toRad(user.lat)) * Math.cos(toRad(c.lat)) * Math.cos(toRad(c.lon - user.lon))
+        Math.sin(toRad(dx)) * Math.cos(toRad(c.lat)),
+        Math.cos(toRad(user.lat)) * Math.sin(toRad(c.lat)) - Math.sin(toRad(user.lat)) * Math.cos(toRad(c.lat)) * Math.cos(toRad(dx))
       ) * 180) / Math.PI;
       const delta = Math.abs(wrap180(bearing - headingDeg));
       if (delta <= hfovDeg / 2) {
