@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b0d10" />
+    <link rel="manifest" href="./assets/manifest-CaO4pMGe.webmanifest" />
+    <title>AR Cities — Horizon</title>
+    <script type="module" crossorigin src="./assets/index-DquA2_Mp.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-BtSwbK_m.css">
+  </head>
+  <body>
+    <main id="app" class="app">
+      <video id="camera" playsinline autoplay muted></video>
+      <canvas id="overlay"></canvas>
+
+      <section id="controls" class="controls">
+        <header class="controls-header">
+          <button id="startBtn" class="btn primary">Start</button>
+          <button id="helpBtn" class="btn">Help</button>
+          <button id="collapseBtn" class="btn" aria-expanded="true" aria-controls="controlsBody">▾</button>
+        </header>
+        <div id="controlsBody" class="controls-body">
+          <div class="field">
+            <label for="distance">Max distance <span id="distanceValue"></span></label>
+            <input id="distance" type="range" min="20" max="5000" step="10" value="1000" />
+          </div>
+          <div class="field row">
+            <label>Units</label>
+            <div class="segmented">
+              <input type="radio" id="unitsKm" name="units" value="km" checked />
+              <label for="unitsKm">km</label>
+              <input type="radio" id="unitsMi" name="units" value="mi" />
+              <label for="unitsMi">mi</label>
+            </div>
+          </div>
+          <div class="field">
+            <label for="hfov">HFOV (°) <span id="hfovValue"></span></label>
+            <input id="hfov" type="range" min="40" max="90" step="1" value="60" />
+          </div>
+          <div class="field">
+            <label for="headingOffset">Heading offset (°) <span id="headingOffsetValue"></span></label>
+            <input id="headingOffset" type="range" min="-20" max="20" step="0.1" value="0" />
+          </div>
+          <div class="field">
+            <label for="smooth">Smoothing <span id="smoothValue"></span></label>
+            <input id="smooth" type="range" min="0" max="0.3" step="0.01" value="0.15" />
+          </div>
+          <details id="debugToggle">
+            <summary>Debug</summary>
+            <div class="debug-grid">
+              <div>Heading: <span id="dbgHeading">–</span>°</div>
+              <div>Pitch: <span id="dbgPitch">–</span>°</div>
+              <div>Roll: <span id="dbgRoll">–</span>°</div>
+              <div>Source: <span id="dbgSource">–</span></div>
+              <div>Rate: <span id="dbgRate">–</span> Hz</div>
+              <div>Smooth: <span id="dbgSmooth">–</span></div>
+            </div>
+          </details>
+
+          <div id="geoStatus" class="status">Location: <span id="geoText">pending</span></div>
+          <div id="manualGeo" class="manual-geo hidden">
+            <div class="field row">
+              <label for="lat">Lat</label>
+              <input id="lat" type="number" step="0.000001" placeholder="0" />
+              <label for="lon">Lon</label>
+              <input id="lon" type="number" step="0.000001" placeholder="0" />
+              <button id="setGeo" class="btn">Set</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <dialog id="onboarding">
+        <h2>AR Cities on the Horizon</h2>
+        <p>
+          This app overlays major world cities at their compass bearing on your
+          camera view. Grant camera, motion, and location permissions, then gently
+          adjust HFOV and heading offset so labels align with known landmarks.
+        </p>
+        <ul>
+          <li>Move your phone in a figure‑8 to calibrate the compass.</li>
+          <li>Use the Distance slider to filter distant cities.</li>
+          <li>Use the km/mi toggle; values update live.</li>
+        </ul>
+        <form method="dialog">
+          <button id="onboardingClose" class="btn primary">Got it</button>
+        </form>
+      </dialog>
+    </main>
+
+  </body>
+</html>

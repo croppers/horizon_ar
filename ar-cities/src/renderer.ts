@@ -32,6 +32,27 @@ function rectsOverlap(a: Rect, b: Rect): boolean {
   return !(a.x + a.w < b.x || b.x + b.w < a.x || a.y + a.h < b.y || b.y + b.h < a.y);
 }
 
+// Try to find a vertical position for a rect that doesn't overlap existing ones.
+// Starts at rect.y and searches upward first, then downward, in row-sized steps.
+function findNonOverlappingY(rect: Rect, placed: Rect[], height: number, maxSteps = 12): number | null {
+  const tried = new Set<number>();
+  const step = Math.max(10, rect.h + 4);
+  const baseY = rect.y;
+
+  const candidates: number[] = [baseY];
+  for (let i = 1; i <= maxSteps; i++) candidates.push(baseY - i * step);
+  for (let i = 1; i <= maxSteps; i++) candidates.push(baseY + i * step);
+
+  for (let y of candidates) {
+    y = Math.max(0, Math.min(height - rect.h, y));
+    if (tried.has(y)) continue;
+    tried.add(y);
+    const test: Rect = { x: rect.x, y, w: rect.w, h: rect.h };
+    if (!placed.some((p) => rectsOverlap(p, test))) return y;
+  }
+  return null;
+}
+
 export interface RenderResult { visibleCount: number; }
 
 export function render(ctx: CanvasRenderingContext2D, input: RendererInput, now: number, lastNowRef: { v: number }): RenderResult {
@@ -71,6 +92,8 @@ export function render(ctx: CanvasRenderingContext2D, input: RendererInput, now:
   candidates.sort((a, b) => b.c.population - a.c.population);
 
   const placed: Rect[] = [];
+  const edgeLeftPlaced: Rect[] = [];
+  const edgeRightPlaced: Rect[] = [];
   const visibleKeys: Set<string> = new Set();
   const maxLabelHeight = 22;
 
@@ -94,16 +117,16 @@ export function render(ctx: CanvasRenderingContext2D, input: RendererInput, now:
     const { w, h } = measureLabel(ctx, text);
 
     let x = azimuthToScreenX(deltaAz, hfovDeg, width);
-    const y = Math.max(0, Math.min(height - maxLabelHeight, horizonY - 6));
+    const yBase = Math.max(0, Math.min(height - maxLabelHeight, horizonY - 6));
 
-    // Declutter: skip if box overlaps a placed box
-    const rect: Rect = { x: Math.max(4, Math.min(width - w - 4, x - w / 2)), y: y - h, w, h };
+    // Initial desired rect centered on azimuth, anchored above horizon
+    const rect: Rect = { x: Math.max(4, Math.min(width - w - 4, x - w / 2)), y: yBase - h, w, h };
 
     if (!offscreen) {
-      if (placed.some((p) => rectsOverlap(p, rect))) {
-        continue;
-      }
-      placed.push(rect);
+      const yPlaced = findNonOverlappingY(rect, placed, height);
+      if (yPlaced === null) continue;
+      rect.y = yPlaced;
+      placed.push({ ...rect });
       visibleKeys.add(key);
 
       const alpha = labelAlpha.get(key) ?? 0;
@@ -129,7 +152,18 @@ export function render(ctx: CanvasRenderingContext2D, input: RendererInput, now:
       if (alpha <= 0.01) continue;
       const side = edgeSide(deltaAz);
       const margin = 6;
-      const chevronY = Math.max(12, Math.min(height - 12, horizonY));
+      // Build a lightweight rect for vertical placement along the edges
+      const edgeRect: Rect = side === 'left'
+        ? { x: margin, y: Math.max(0, Math.min(height - h, horizonY - h / 2)), w, h }
+        : { x: width - margin - w, y: Math.max(0, Math.min(height - h, horizonY - h / 2)), w, h };
+      const used = side === 'left' ? edgeLeftPlaced : edgeRightPlaced;
+      const yPlaced = findNonOverlappingY(edgeRect, used, height);
+      if (yPlaced === null) continue;
+      edgeRect.y = yPlaced;
+      used.push({ ...edgeRect });
+
+      const centerY = edgeRect.y + edgeRect.h / 2;
+      const textY = edgeRect.y + edgeRect.h - 6;
       ctx.save();
       ctx.globalAlpha = alpha;
       ctx.strokeStyle = 'rgba(255,255,255,0.6)';
@@ -137,21 +171,21 @@ export function render(ctx: CanvasRenderingContext2D, input: RendererInput, now:
       ctx.lineWidth = 2;
       ctx.beginPath();
       if (side === 'left') {
-        ctx.moveTo(margin, chevronY);
-        ctx.lineTo(margin + 10, chevronY - 6);
-        ctx.moveTo(margin, chevronY);
-        ctx.lineTo(margin + 10, chevronY + 6);
+        ctx.moveTo(margin, centerY);
+        ctx.lineTo(margin + 10, centerY - 6);
+        ctx.moveTo(margin, centerY);
+        ctx.lineTo(margin + 10, centerY + 6);
         ctx.stroke();
         ctx.textAlign = 'left';
-        ctx.fillText(text, margin + 16, chevronY + 5);
+        ctx.fillText(text, margin + 16, textY);
       } else {
-        ctx.moveTo(width - margin, chevronY);
-        ctx.lineTo(width - margin - 10, chevronY - 6);
-        ctx.moveTo(width - margin, chevronY);
-        ctx.lineTo(width - margin - 10, chevronY + 6);
+        ctx.moveTo(width - margin, centerY);
+        ctx.lineTo(width - margin - 10, centerY - 6);
+        ctx.moveTo(width - margin, centerY);
+        ctx.lineTo(width - margin - 10, centerY + 6);
         ctx.stroke();
         ctx.textAlign = 'right';
-        ctx.fillText(text, width - margin - 16, chevronY + 5);
+        ctx.fillText(text, width - margin - 16, textY);
       }
       ctx.restore();
     }
