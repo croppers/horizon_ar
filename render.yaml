@@ -1,0 +1,11 @@
+services:
+  - type: static
+    name: ar-cities
+    rootDir: ar-cities
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    pullRequestPreviewsEnabled: true
+    headers:
+      - path: /manifest.webmanifest
+        name: Content-Type
+        value: application/manifest+json
