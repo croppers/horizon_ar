@@ -9,7 +9,7 @@ const ctx = canvas.getContext('2d')!;
 
 let settings: Settings = { maxDistanceKm: 1000, units: 'km', hfovDeg: 60, headingOffsetDeg: 0, smoothing: 0.15, showOffscreenIndicators: false };
 
-let user = { lat: 0, lon: 0 };
+let user = { lat: 39.9960, lon: -74.0621 };
 let haveLocation = false;
 let cities: City[] = [];
 let orientation = startOrientation({ smoothing: settings.smoothing, headingOffsetDeg: settings.headingOffsetDeg });
