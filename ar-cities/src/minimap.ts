@@ -4,22 +4,34 @@ import { feature, mesh } from 'topojson-client';
 
 // Data source: Natural Earth via unpkg world-atlas (under permissive terms)
 // We fetch small-scale (110m) data for low payload.
-const WORLD_TOPO_URL = 'https://unpkg.com/world-atlas@2/countries-110m.json';
+const LAND_TOPO_URL = 'https://unpkg.com/world-atlas@2/land-110m.json';
+const COUNTRIES_TOPO_URL = 'https://unpkg.com/world-atlas@2/countries-110m.json';
 
-let cachedWorld: any | null = null;
+let loadWorldPromise: Promise<void> | null = null;
 let cachedLand: GeoJSON.MultiPolygon | GeoJSON.Polygon | null = null;
 let cachedCountriesMesh: GeoJSON.MultiLineString | GeoJSON.LineString | null = null;
 
 async function loadWorld(): Promise<void> {
-  if (cachedWorld) return;
-  const res = await fetch(WORLD_TOPO_URL, { cache: 'force-cache' });
-  if (!res.ok) throw new Error('Failed to load world topojson');
-  cachedWorld = await res.json();
-  // Extract land and country boundaries
-  const landFeat: any = feature(cachedWorld, (cachedWorld.objects as any).land);
-  cachedLand = landFeat as any;
-  const countriesMesh: any = mesh(cachedWorld, (cachedWorld.objects as any).countries, (a: any, b: any) => a !== b);
-  cachedCountriesMesh = countriesMesh as any;
+  if (cachedLand && cachedCountriesMesh) return;
+  if (loadWorldPromise) return loadWorldPromise;
+  loadWorldPromise = (async () => {
+    const [landRes, countriesRes] = await Promise.all([
+      fetch(LAND_TOPO_URL, { cache: 'force-cache' }),
+      fetch(COUNTRIES_TOPO_URL, { cache: 'force-cache' })
+    ]);
+    if (!landRes.ok || !countriesRes.ok) throw new Error('Failed to load world atlas');
+    const [landTopo, countriesTopo] = await Promise.all([landRes.json(), countriesRes.json()]);
+    const landFeat: any = feature(landTopo, (landTopo.objects as any).land);
+    cachedLand = landFeat as any;
+    const countriesMesh: any = mesh(countriesTopo, (countriesTopo.objects as any).countries, (a: any, b: any) => a !== b);
+    cachedCountriesMesh = countriesMesh as any;
+  })();
+  try {
+    await loadWorldPromise;
+  } finally {
+    // keep promise for subsequent awaiters until caches set; then null out
+    loadWorldPromise = null;
+  }
 }
 
 interface MinimapParams {
@@ -135,11 +147,11 @@ export async function drawMinimap(ctx: CanvasRenderingContext2D, p: MinimapParam
     ctx.restore();
   }
 
-  // Country boundaries overlay
+  // Country boundaries overlay (semi-transparent)
   if (cachedCountriesMesh) {
     ctx.save();
-    ctx.strokeStyle = 'rgba(90,120,150,0.5)';
-    ctx.lineWidth = 0.75;
+    ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+    ctx.lineWidth = 0.8;
     ctx.beginPath();
     drawGeoJSONMultiLineString(ctx, cachedCountriesMesh, x, y, w, h);
     ctx.stroke();
