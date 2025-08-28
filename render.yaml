@@ -1,10 +1,12 @@
 services:
-  - type: static_site
+  - type: web
     name: ar-cities
     rootDir: ar-cities
+    runtime: static
     buildCommand: npm ci && npm run build
-    publishPath: dist
-    pullRequestPreviewsEnabled: true
+    staticPublishPath: dist
+    previews:
+      generation: automatic
     headers:
       - path: /manifest.webmanifest
         name: Content-Type
