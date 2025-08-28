@@ -25,9 +25,11 @@ const ui = initUI({
     orientation.setHeadingOffset(s.headingOffsetDeg);
   },
   onStart: async () => {
-    await requestMotionPermissions();
-    await startCamera(video);
+    // Request geolocation first to preserve user activation for the permission prompt (iOS/Safari quirk)
     setupGeolocation();
+    // Then request motion and camera without awaiting to avoid losing user activation
+    requestMotionPermissions().catch(() => {});
+    startCamera(video).catch(() => {});
   },
   onManualGeo: (pos) => {
     user = pos; haveLocation = true; uiHelpers.setGeoStatus(`${pos.lat.toFixed(5)}, ${pos.lon.toFixed(5)} (manual)`);
@@ -36,6 +38,7 @@ const ui = initUI({
 const uiHelpers = ui;
 
 function setupGeolocation() {
+  uiHelpers.setGeoStatus('requesting…');
   const stop = watchGeolocation(
     (g) => {
       user = { lat: g.lat, lon: g.lon };
@@ -44,7 +47,19 @@ function setupGeolocation() {
     },
     (err) => {
       console.warn('Geolocation error', err);
-      uiHelpers.setGeoStatus('denied — enter lat/lon');
+      let msg = 'location error';
+      const anyErr = err as any;
+      if (typeof anyErr?.code === 'number') {
+        switch (anyErr.code) {
+          case 1: msg = 'permission denied — check site settings'; break;
+          case 2: msg = 'position unavailable'; break;
+          case 3: msg = 'timeout — move outdoors or check settings'; break;
+          default: msg = 'location error';
+        }
+      } else if (anyErr?.message) {
+        msg = anyErr.message;
+      }
+      uiHelpers.setGeoStatus(msg);
       uiHelpers.showManualGeo(true);
     }
   );

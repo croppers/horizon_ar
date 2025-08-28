@@ -79,7 +79,32 @@ export function watchGeolocation(onUpdate: (g: GeoState) => void, onError: (e: G
     onError(new DOMException('Geolocation not supported'));
     return () => {};
   }
+  if (!window.isSecureContext) {
+    onError(new DOMException('Geolocation requires HTTPS'));
+    return () => {};
+  }
+
   let watchId: number | null = null;
+  const opts: PositionOptions = { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 };
+
+  // First, trigger a one-shot request to prompt the permission dialog consistently on some browsers.
+  try {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude, longitude, accuracy } = pos.coords;
+        onUpdate({ lat: latitude, lon: longitude, accuracy });
+      },
+      (err) => {
+        // Surface the initial error; we will still try to start a watch below in case state changes later.
+        onError(err);
+      },
+      opts
+    );
+  } catch (e) {
+    onError(e as DOMException);
+  }
+
+  // Start continuous updates
   try {
     watchId = navigator.geolocation.watchPosition(
       (pos) => {
@@ -87,11 +112,12 @@ export function watchGeolocation(onUpdate: (g: GeoState) => void, onError: (e: G
         onUpdate({ lat: latitude, lon: longitude, accuracy });
       },
       (err) => onError(err),
-      { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 }
+      opts
     );
   } catch (e) {
     onError(e as DOMException);
   }
+
   return () => {
     if (watchId !== null) navigator.geolocation.clearWatch(watchId);
   };
