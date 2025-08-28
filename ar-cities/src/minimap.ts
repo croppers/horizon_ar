@@ -1,57 +1,26 @@
 import type { City, LatLon } from './types';
 import { haversineDistanceKm, wrap180 } from './geo';
+import { feature, mesh } from 'topojson-client';
 
-// Extremely simplified landmass polygons for major continents.
-// Coordinates are [lon, lat]. This is intentionally low-res to keep payload tiny.
-const LAND_POLYGONS: Array<Array<[number, number]>> = [
-  // North America (very rough)
-  [
-    [-168, 72], [-140, 72], [-120, 70], [-95, 78], [-65, 83], [-52, 72], [-60, 60],
-    [-75, 50], [-95, 45], [-110, 35], [-120, 30], [-125, 25], [-130, 30], [-140, 50], [-168, 72]
-  ],
-  // South America
-  [
-    [-81, 12], [-75, -4], [-70, -15], [-63, -22], [-54, -33], [-52, -47], [-38, -46], [-35, -8], [-59, 5], [-81, 12]
-  ],
-  // Europe (core)
-  [
-    [-10, 35], [0, 43], [10, 45], [20, 48], [24, 60], [30, 60], [40, 45], [30, 41], [19, 40], [10, 36], [-10, 35]
-  ],
-  // Scandinavia
-  [
-    [5, 58], [12, 62], [20, 66], [25, 70], [30, 70], [32, 65], [24, 60], [16, 58], [5, 58]
-  ],
-  // Africa
-  [
-    [-17, 37], [0, 35], [10, 34], [25, 31], [32, 24], [35, 15], [44, -10], [40, -20], [32, -35], [15, -35],
-    [5, -25], [-5, -5], [-10, 10], [-17, 15], [-17, 37]
-  ],
-  // Middle East + West Asia (very rough)
-  [
-    [35, 33], [44, 36], [55, 35], [60, 40], [70, 45], [75, 35], [70, 25], [60, 24], [50, 20], [40, 25], [35, 33]
-  ],
-  // Central/East/Southeast Asia
-  [
-    [70, 45], [85, 50], [105, 50], [120, 45], [135, 48], [150, 45], [132, 25], [120, 20], [110, 15], [105, 10],
-    [100, 8], [95, 12], [90, 15], [85, 20], [78, 8], [70, 25], [70, 45]
-  ],
-  // Japan + Korea (coarse)
-  [
-    [126, 37], [131, 39], [141, 43], [143, 41], [141, 36], [135, 34], [129, 33], [126, 37]
-  ],
-  // Australia
-  [
-    [113, -10], [153, -10], [153, -43], [114, -35], [113, -10]
-  ],
-  // Greenland
-  [
-    [-52, 72], [-40, 78], [-30, 82], [-20, 80], [-35, 70], [-45, 65], [-52, 72]
-  ],
-  // Antarctica (approximate northern edge)
-  [
-    [-180, -60], [-120, -60], [-60, -60], [0, -60], [60, -60], [120, -60], [180, -60], [-180, -60]
-  ]
-];
+// Data source: Natural Earth via unpkg world-atlas (under permissive terms)
+// We fetch small-scale (110m) data for low payload.
+const WORLD_TOPO_URL = 'https://unpkg.com/world-atlas@2/countries-110m.json';
+
+let cachedWorld: any | null = null;
+let cachedLand: GeoJSON.MultiPolygon | GeoJSON.Polygon | null = null;
+let cachedCountriesMesh: GeoJSON.MultiLineString | GeoJSON.LineString | null = null;
+
+async function loadWorld(): Promise<void> {
+  if (cachedWorld) return;
+  const res = await fetch(WORLD_TOPO_URL, { cache: 'force-cache' });
+  if (!res.ok) throw new Error('Failed to load world topojson');
+  cachedWorld = await res.json();
+  // Extract land and country boundaries
+  const landFeat: any = feature(cachedWorld, (cachedWorld.objects as any).land);
+  cachedLand = landFeat as any;
+  const countriesMesh: any = mesh(cachedWorld, (cachedWorld.objects as any).countries, (a: any, b: any) => a !== b);
+  cachedCountriesMesh = countriesMesh as any;
+}
 
 interface MinimapParams {
   canvasWidth: number;
@@ -103,7 +72,42 @@ function drawRoundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, w:
   ctx.closePath();
 }
 
-export function drawMinimap(ctx: CanvasRenderingContext2D, p: MinimapParams) {
+function drawGeoJSONPolygon(ctx: CanvasRenderingContext2D, geom: GeoJSON.Polygon, x: number, y: number, w: number, h: number) {
+  for (const ring of geom.coordinates) {
+    for (let i = 0; i < ring.length; i++) {
+      const [lon, lat] = ring[i];
+      const { px, py } = projectEquirect(lon, lat, x, y, w, h);
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+  }
+}
+
+function drawGeoJSONMultiPolygon(ctx: CanvasRenderingContext2D, geom: GeoJSON.MultiPolygon, x: number, y: number, w: number, h: number) {
+  for (const poly of geom.coordinates) {
+    for (const ring of poly) {
+      for (let i = 0; i < ring.length; i++) {
+        const [lon, lat] = ring[i];
+        const { px, py } = projectEquirect(lon, lat, x, y, w, h);
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+    }
+  }
+}
+
+function drawGeoJSONMultiLineString(ctx: CanvasRenderingContext2D, geom: GeoJSON.MultiLineString | GeoJSON.LineString, x: number, y: number, w: number, h: number) {
+  const lines = (geom.type === 'LineString') ? [geom.coordinates] : geom.coordinates;
+  for (const line of lines) {
+    for (let i = 0; i < line.length; i++) {
+      const [lon, lat] = line[i];
+      const { px, py } = projectEquirect(lon, lat, x, y, w, h);
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+  }
+}
+
+export async function drawMinimap(ctx: CanvasRenderingContext2D, p: MinimapParams) {
   const { x, y, w, h, user, headingDeg, hfovDeg, maxDistanceKm, cities } = p;
 
   // Background card
@@ -114,24 +118,33 @@ export function drawMinimap(ctx: CanvasRenderingContext2D, p: MinimapParams) {
   ctx.fill();
   ctx.restore();
 
-  // Land
-  ctx.save();
-  ctx.strokeStyle = 'rgba(120,160,120,0.6)';
-  ctx.fillStyle = 'rgba(40,80,50,0.35)';
-  ctx.lineWidth = 1;
-  for (const poly of LAND_POLYGONS) {
-    const first = projectEquirect(poly[0][0], poly[0][1], x, y, w, h);
+  // Load world data on first draw
+  try { await loadWorld(); } catch {}
+
+  // Land fill
+  if (cachedLand) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(120,160,120,0.6)';
+    ctx.fillStyle = 'rgba(40,80,50,0.35)';
+    ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(first.px, first.py);
-    for (let i = 1; i < poly.length; i++) {
-      const { px, py } = projectEquirect(poly[i][0], poly[i][1], x, y, w, h);
-      ctx.lineTo(px, py);
-    }
-    ctx.closePath();
+    if (cachedLand.type === 'Polygon') drawGeoJSONPolygon(ctx, cachedLand, x, y, w, h);
+    else drawGeoJSONMultiPolygon(ctx, cachedLand as GeoJSON.MultiPolygon, x, y, w, h);
     ctx.fill();
     ctx.stroke();
+    ctx.restore();
   }
-  ctx.restore();
+
+  // Country boundaries overlay
+  if (cachedCountriesMesh) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(90,120,150,0.5)';
+    ctx.lineWidth = 0.75;
+    ctx.beginPath();
+    drawGeoJSONMultiLineString(ctx, cachedCountriesMesh, x, y, w, h);
+    ctx.stroke();
+    ctx.restore();
+  }
 
   // User point
   const up = projectEquirect(user.lon, user.lat, x, y, w, h);
@@ -187,13 +200,10 @@ export function drawMinimap(ctx: CanvasRenderingContext2D, p: MinimapParams) {
     let alpha = 0.25;
     let color = 'rgba(180,220,255,'; // will append alpha
     if (visibleRadius) {
-      // Check if within current HFOV (by bearing difference)
-      const dy = c.lat - user.lat;
-      const dx = c.lon - user.lon;
-      // Rough bearing using equirectangular approximation (sufficient for wedge inclusion on small map)
+      // Rough great-circle bearing
       const bearing = (Math.atan2(
-        Math.sin(toRad(dx)) * Math.cos(toRad(c.lat)),
-        Math.cos(toRad(user.lat)) * Math.sin(toRad(c.lat)) - Math.sin(toRad(user.lat)) * Math.cos(toRad(c.lat)) * Math.cos(toRad(dx))
+        Math.sin(toRad(c.lon - user.lon)) * Math.cos(toRad(c.lat)),
+        Math.cos(toRad(user.lat)) * Math.sin(toRad(c.lat)) - Math.sin(toRad(user.lat)) * Math.cos(toRad(c.lat)) * Math.cos(toRad(c.lon - user.lon))
       ) * 180) / Math.PI;
       const delta = Math.abs(wrap180(bearing - headingDeg));
       if (delta <= hfovDeg / 2) {
