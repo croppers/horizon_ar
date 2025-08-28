@@ -7,6 +7,7 @@ export interface UIState {
   onSettingsChange?: (s: Settings) => void;
   onStart?: () => void;
   onManualGeo?: (pos: LatLon) => void;
+  onRequestLocation?: () => void;
 }
 
 function loadSettings(): Settings {
@@ -55,6 +56,8 @@ export function initUI(state: UIState) {
   const latInput = document.getElementById('lat') as HTMLInputElement;
   const lonInput = document.getElementById('lon') as HTMLInputElement;
   const setGeo = document.getElementById('setGeo') as HTMLButtonElement;
+  const allowLocationRow = document.getElementById('allowLocationRow') as HTMLDivElement;
+  const allowLocationBtn = document.getElementById('allowLocationBtn') as HTMLButtonElement;
 
   // Parse flexible coordinate strings like "41", "41N", "41.5°N", "41 30 0 N".
   function parseCoord(input: string, isLat: boolean): number | null {
@@ -143,6 +146,21 @@ export function initUI(state: UIState) {
   }
   refreshLabels();
 
+  // Permissions API hint for location button visibility
+  try {
+    const anyNav: any = navigator;
+    if (anyNav.permissions && typeof anyNav.permissions.query === 'function') {
+      anyNav.permissions.query({ name: 'geolocation' as PermissionName }).then((status: any) => {
+        const state = status.state as 'granted' | 'denied' | 'prompt';
+        allowLocationRow?.classList.toggle('hidden', state === 'granted');
+        status.onchange = () => {
+          const st = status.state as 'granted' | 'denied' | 'prompt';
+          allowLocationRow?.classList.toggle('hidden', st === 'granted');
+        };
+      }).catch(() => {});
+    }
+  } catch {}
+
   function pushChange() {
     saveSettings(settings);
     state.onSettingsChange?.(settings);
@@ -159,6 +177,7 @@ export function initUI(state: UIState) {
   unitsMi.addEventListener('change', () => { settings.units = 'mi'; pushChange(); });
 
   startBtn.addEventListener('click', () => state.onStart?.());
+  allowLocationBtn?.addEventListener('click', () => state.onRequestLocation?.());
 
   setGeo.addEventListener('click', () => {
     const lat = parseCoord(latInput.value, true);
@@ -174,6 +193,7 @@ export function initUI(state: UIState) {
   return {
     setGeoStatus(text: string) { geoStatus.textContent = text; },
     showManualGeo(show: boolean) { manualGeo.classList.toggle('hidden', !show); },
+    showAllowLocation(show: boolean) { allowLocationRow?.classList.toggle('hidden', !show); },
     updateDebug(heading: number, pitch: number, roll: number, source: string, rateHz: number) {
       dbgHeading.textContent = heading.toFixed(1);
       dbgPitch.textContent = pitch.toFixed(1);

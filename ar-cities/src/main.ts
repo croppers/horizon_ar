@@ -1,5 +1,5 @@
 import { initUI } from './ui';
-import { startCamera, requestMotionPermissions, watchGeolocation, startOrientation } from './sensors';
+import { startCamera, requestMotionPermissions, watchGeolocation, startOrientation, requestGeolocationPrompt } from './sensors';
 import { estimateVfovDeg } from './projection';
 import type { City, Settings } from './types';
 
@@ -31,6 +31,35 @@ const ui = initUI({
     requestMotionPermissions().catch(() => {});
     startCamera(video).catch(() => {});
   },
+  onRequestLocation: async () => {
+    try {
+      uiHelpers.setGeoStatus('requesting…');
+      const g = await requestGeolocationPrompt();
+      user = { lat: g.lat, lon: g.lon };
+      haveLocation = true;
+      uiHelpers.setGeoStatus(`${g.lat.toFixed(5)}, ${g.lon.toFixed(5)} ±${Math.round(g.accuracy || 0)}m`);
+      uiHelpers.showManualGeo(false);
+      uiHelpers.showAllowLocation(false);
+      // Start continuous updates after successful prompt
+      setupGeolocation();
+    } catch (err) {
+      console.warn('Geolocation prompt error', err);
+      let msg = 'location error';
+      const anyErr = err as any;
+      if (typeof anyErr?.code === 'number') {
+        switch (anyErr.code) {
+          case 1: msg = 'permission denied — check site settings'; break;
+          case 2: msg = 'position unavailable'; break;
+          case 3: msg = 'timeout — move outdoors or check settings'; break;
+        }
+      } else if (anyErr?.message) {
+        msg = anyErr.message;
+      }
+      uiHelpers.setGeoStatus(msg);
+      uiHelpers.showAllowLocation(true);
+      uiHelpers.showManualGeo(true);
+    }
+  },
   onManualGeo: (pos) => {
     user = pos; haveLocation = true; uiHelpers.setGeoStatus(`${pos.lat.toFixed(5)}, ${pos.lon.toFixed(5)} (manual)`);
   }
@@ -44,6 +73,7 @@ function setupGeolocation() {
       user = { lat: g.lat, lon: g.lon };
       haveLocation = true;
       uiHelpers.setGeoStatus(`${g.lat.toFixed(5)}, ${g.lon.toFixed(5)} ±${Math.round(g.accuracy || 0)}m`);
+      uiHelpers.showAllowLocation(false);
     },
     (err) => {
       console.warn('Geolocation error', err);
@@ -60,6 +90,7 @@ function setupGeolocation() {
         msg = anyErr.message;
       }
       uiHelpers.setGeoStatus(msg);
+      uiHelpers.showAllowLocation(true);
       uiHelpers.showManualGeo(true);
     }
   );

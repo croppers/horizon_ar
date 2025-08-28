@@ -123,6 +123,29 @@ export function watchGeolocation(onUpdate: (g: GeoState) => void, onError: (e: G
   };
 }
 
+// Request a one-shot geolocation inside a user gesture to force prompt.
+export async function requestGeolocationPrompt(): Promise<GeoState> {
+  return new Promise((resolve, reject) => {
+    if (!('geolocation' in navigator)) {
+      reject(new DOMException('Geolocation not supported'));
+      return;
+    }
+    if (!window.isSecureContext) {
+      reject(new DOMException('Geolocation requires HTTPS'));
+      return;
+    }
+    const opts: PositionOptions = { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 };
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude, longitude, accuracy } = pos.coords;
+        resolve({ lat: latitude, lon: longitude, accuracy });
+      },
+      (err) => reject(err),
+      opts
+    );
+  });
+}
+
 // Generic Sensor API types (ambient declarations)
 // Using 'any' to avoid failing on platforms without these types
 interface GenericOrientationSensor extends EventTarget {
