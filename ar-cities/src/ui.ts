@@ -56,6 +56,53 @@ export function initUI(state: UIState) {
   const lonInput = document.getElementById('lon') as HTMLInputElement;
   const setGeo = document.getElementById('setGeo') as HTMLButtonElement;
 
+  // Parse flexible coordinate strings like "41", "41N", "41.5°N", "41 30 0 N".
+  function parseCoord(input: string, isLat: boolean): number | null {
+    if (!input) return null;
+    let s = input.trim().toUpperCase();
+    // Replace commas with spaces
+    s = s.replace(/,/g, ' ');
+    // Remove extra labels
+    s = s.replace(/[\s]+/g, ' ');
+    // Extract direction
+    let dir: 'N'|'S'|'E'|'W'|null = null;
+    const dirMatch = s.match(/([NSEW])$/);
+    if (dirMatch) { dir = dirMatch[1] as any; s = s.slice(0, -1).trim(); }
+
+    // Split DMS components by degree, minute, second symbols or spaces
+    // Examples supported: 41, 41.5, 41°30, 41°30', 41°30'15", 41 30, 41 30 15
+    const parts: number[] = [];
+    let rem = s.replace(/°/g, ' ').replace(/'/g, ' ').replace(/"/g, ' ');
+    rem = rem.replace(/[\s]+/g, ' ').trim();
+    if (!rem) return null;
+    for (const token of rem.split(' ')) {
+      if (!token) continue;
+      const val = Number(token);
+      if (!Number.isFinite(val)) return null;
+      parts.push(val);
+      if (parts.length === 3) break;
+    }
+    if (parts.length === 0) return null;
+    const deg = parts[0];
+    const min = parts[1] || 0;
+    const sec = parts[2] || 0;
+    let sign = 1;
+    if (deg < 0) sign = -1;
+    if (dir) {
+      if (dir === 'S' || dir === 'W') sign = -1;
+      if (dir === 'N' || dir === 'E') sign = 1;
+    }
+    let absDeg = Math.abs(deg) + Math.abs(min)/60 + Math.abs(sec)/3600;
+    let val = sign * absDeg;
+    // Clamp to valid ranges
+    if (isLat) {
+      if (Math.abs(val) > 90) return null;
+    } else {
+      if (Math.abs(val) > 180) return null;
+    }
+    return val;
+  }
+
   // Onboarding
   if (!localStorage.getItem('arcities.onboarded')) {
     onboarding.showModal();
@@ -114,10 +161,14 @@ export function initUI(state: UIState) {
   startBtn.addEventListener('click', () => state.onStart?.());
 
   setGeo.addEventListener('click', () => {
-    const lat = Number(latInput.value);
-    const lon = Number(lonInput.value);
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
-    state.onManualGeo?.({ lat, lon });
+    const lat = parseCoord(latInput.value, true);
+    const lon = parseCoord(lonInput.value, false);
+    if (!Number.isFinite(lat as number) || !Number.isFinite(lon as number)) {
+      const geoText = document.getElementById('geoText');
+      if (geoText) geoText.textContent = 'invalid lat/lon format';
+      return;
+    }
+    state.onManualGeo?.({ lat: lat as number, lon: lon as number });
   });
 
   return {

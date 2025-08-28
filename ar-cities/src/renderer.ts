@@ -23,9 +23,10 @@ function updateAlpha(targetVisible: Set<string>, dt: number) {
 
 function measureLabel(ctx: CanvasRenderingContext2D, text: string): { w: number; h: number } {
   const m = ctx.measureText(text);
-  const h = (m.actualBoundingBoxAscent || 12) + (m.actualBoundingBoxDescent || 4);
-  const w = m.width + 12;
-  return { w, h };
+  // Use a fixed line height to ensure consistent stacking across browsers
+  const fixedLineHeight = 24; // px
+  const w = m.width + 12; // horizontal padding
+  return { w, h: fixedLineHeight };
 }
 
 function rectsOverlap(a: Rect, b: Rect): boolean {
@@ -36,7 +37,7 @@ function rectsOverlap(a: Rect, b: Rect): boolean {
 // Starts at rect.y and searches upward first, then downward, in row-sized steps.
 function findNonOverlappingY(rect: Rect, placed: Rect[], height: number, maxSteps = 12): number | null {
   const tried = new Set<number>();
-  const step = Math.max(10, rect.h + 4);
+  const step = Math.max(12, rect.h + 6);
   const baseY = rect.y;
 
   const candidates: number[] = [baseY];
@@ -95,7 +96,7 @@ export function render(ctx: CanvasRenderingContext2D, input: RendererInput, now:
   const edgeLeftPlaced: Rect[] = [];
   const edgeRightPlaced: Rect[] = [];
   const visibleKeys: Set<string> = new Set();
-  const maxLabelHeight = 22;
+  const maxLabelHeight = 24;
 
   // Time delta for fade animation
   const dt = lastNowRef.v ? Math.min(0.1, (now - lastNowRef.v) / 1000) : 0;
@@ -123,7 +124,8 @@ export function render(ctx: CanvasRenderingContext2D, input: RendererInput, now:
     const rect: Rect = { x: Math.max(4, Math.min(width - w - 4, x - w / 2)), y: yBase - h, w, h };
 
     if (!offscreen) {
-      const yPlaced = findNonOverlappingY(rect, placed, height);
+      const maxSteps = Math.ceil(height / (rect.h + 6)) + 2;
+      const yPlaced = findNonOverlappingY(rect, placed, height, maxSteps);
       if (yPlaced === null) continue;
       rect.y = yPlaced;
       placed.push({ ...rect });
@@ -162,7 +164,8 @@ export function render(ctx: CanvasRenderingContext2D, input: RendererInput, now:
         ? { x: margin, y: Math.max(0, Math.min(height - h, horizonY - h / 2)), w, h }
         : { x: width - margin - w, y: Math.max(0, Math.min(height - h, horizonY - h / 2)), w, h };
       const used = side === 'left' ? edgeLeftPlaced : edgeRightPlaced;
-      const yPlaced = findNonOverlappingY(edgeRect, used, height);
+      const maxStepsEdge = Math.ceil(height / (edgeRect.h + 6)) + 2;
+      const yPlaced = findNonOverlappingY(edgeRect, used, height, maxStepsEdge);
       if (yPlaced === null) continue;
       edgeRect.y = yPlaced;
       used.push({ ...edgeRect });
