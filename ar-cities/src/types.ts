@@ -50,4 +50,5 @@ export interface RendererInput {
   cities: City[];
   populationOpacity: Map<string, number>; // key = `${name}|${country}`
   showOffscreenIndicators: boolean;
+  showMinimap?: boolean;
 }

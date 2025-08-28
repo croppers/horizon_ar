@@ -1,6 +1,7 @@
 import { azimuthToScreenX, estimateVfovDeg, isWithinFov, edgeSide, pitchToScreenY } from './projection';
 import { haversineDistanceKm, initialBearingDeg, wrap180 } from './geo';
 import type { City, RendererInput } from './types';
+import { drawMinimap } from './minimap';
 
 interface Rect { x: number; y: number; w: number; h: number; }
 
@@ -57,7 +58,7 @@ function findNonOverlappingY(rect: Rect, placed: Rect[], height: number, maxStep
 export interface RenderResult { visibleCount: number; }
 
 export function render(ctx: CanvasRenderingContext2D, input: RendererInput, now: number, lastNowRef: { v: number }): RenderResult {
-  const { width, height, hfovDeg, pitchDeg, headingDeg, cities, user, units, maxDistanceKm, showOffscreenIndicators } = input;
+  const { width, height, hfovDeg, pitchDeg, headingDeg, cities, user, units, maxDistanceKm, showOffscreenIndicators, showMinimap } = input;
   const dpr = Math.max(1, window.devicePixelRatio || 1);
   if (ctx.canvas.width !== Math.floor(width * dpr) || ctx.canvas.height !== Math.floor(height * dpr)) {
     ctx.canvas.width = Math.floor(width * dpr);
@@ -200,6 +201,28 @@ export function render(ctx: CanvasRenderingContext2D, input: RendererInput, now:
   }
 
   updateAlpha(visibleKeys, dt);
+
+  // Draw minimap (bottom-right)
+  if (showMinimap !== false) {
+    const pad = 8;
+    const wMini = Math.min(240, Math.floor(width * 0.5));
+    const hMini = Math.min(140, Math.floor(height * 0.35));
+    const xMini = width - pad - wMini;
+    const yMini = height - pad - hMini;
+    drawMinimap(ctx, {
+      canvasWidth: width,
+      canvasHeight: height,
+      x: xMini,
+      y: yMini,
+      w: wMini,
+      h: hMini,
+      user,
+      headingDeg,
+      hfovDeg,
+      maxDistanceKm,
+      cities
+    });
+  }
 
   return { visibleCount: placed.length };
 }
